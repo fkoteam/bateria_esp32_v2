@@ -394,9 +394,26 @@ void leerPiezos() {
     }
    
     int val = analogRead(adc_gpios[i]);
+/* vamos a probar a quitar esto
     if(i>5 && val==4095)
-      val=0;
-    if (val > max)
+      val=0; */
+     
+     
+  if (i == 0 && pedalHit && configMin[i] >= val)
+  {
+     
+    pedalHit = false;
+
+
+    Beginplay(0, pie_izq_cer, pie_izq_cer_len, configVol[valorMax], 70);
+    pararSplash = true;
+
+  }
+     if(i==0 && configMin[i] < val)
+     {
+        pedalHit = true;
+     }
+    if (val > max && i>0)
     {
       max = val;
       valorMax = i;
@@ -417,21 +434,9 @@ void leerPiezos() {
   Serial.printf("valorrrrr %d : %d \n", valorMax, max);
 }*/
 
-  if (valorMax == 0 && pedalHit && configMin[valorMax] >= max)
-  {
-     
-    pedalHit = false;
-
-
-    Beginplay(0, pie_izq_cer, pie_izq_cer_len, configVol[valorMax], 70);
-    pararSplash = true;
-
-  }
   if (configMin[valorMax] < max)
   {
-    if (valorMax == 0)
-      pedalHit = true;
-    else if (valorMax == 1 && pedalHit)
+    if (valorMax == 1 && pedalHit)
       Beginplay(1, der1op, der1op_len, ((float)max / (float)configMax[valorMax])*configVol[valorMax], 1);
     else if (valorMax == 1 && !pedalHit)
       Beginplay(1, der1cl, der1cl_len, ((float)max / (float)configMax[valorMax])*configVol[valorMax], 1);
