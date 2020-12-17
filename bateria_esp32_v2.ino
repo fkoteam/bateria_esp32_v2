@@ -19,6 +19,9 @@ uint64_t reg_b; // Used to store ADC2 control register
 #include "izq3.h"
 #include "pie_der.h"
 #include "pie_izq_cer.h"
+#include "wifi_msg.h"
+#include "no_wifi.h"
+
 
 unsigned long t0 = millis();
 long freqTamborMillis = 50.0; //600bpm
@@ -42,12 +45,12 @@ boolean wifiEnabled = false;
 
 
 AudioOutputI2S *out; //internal DAC channel 1 (pin25) on ESP32
-AudioOutputMixerStub *stub[8];
+AudioOutputMixerStub *stub[10];
 AudioOutputMixer *mixer;
-AudioGeneratorWAV *wav[8];
-AudioFileSourcePROGMEM *file[8];
-boolean Running[8];
-long start[8];
+AudioGeneratorWAV *wav[10];
+AudioFileSourcePROGMEM *file[10];
+boolean Running[10];
+long start[10];
 int adc_gpios[8] = {36,  34, 35, 32, 33, 27, 14, 12};
 
 int valoresMaximos[8];
@@ -83,10 +86,13 @@ void setup()
   out = new AudioOutputI2S();
 
   mixer = new AudioOutputMixer(32, out);
-  for (int i = 0; i < 8; i++)
+  for (int i = 0; i < 10; i++)
   {
     stub[i] = mixer->NewInput();
     start[i] = 0;
+  }
+  for (int i = 0; i < 8; i++)
+  {
     pinMode(adc_gpios[i], INPUT);
 
   }
@@ -118,7 +124,7 @@ void loop()
   leerPiezos();
   //Serial.println("b:)");
 
-  for (int i = 0; i < 8; i++)
+  for (int i = 0; i < 10; i++)
   {
 
     if (i == 1 && pararSplash && Running[i])
@@ -154,6 +160,18 @@ void loop()
         //        delete wav[i];
         //    delete file[i];
         Running[i] = false; Serial.printf("stopping %d \n", i);
+        if (i == 9)
+        {
+          ESP8266SAM *sam = new ESP8266SAM;
+
+          String msg_ip = (String)WiFi.localIP().toString() + ".";
+          const char*  msg_ip2 = msg_ip.c_str();
+          sam->Say(out, msg_ip2);
+          delay(2000);
+        }
+
+
+
 
       }
     }
@@ -254,19 +272,11 @@ void initWifi()
   Serial.println(F("Then press the Connect button"));
   Serial.println(F("Then open a MIDI listener (eg MIDI-OX) and monitor incoming notes"));
 
-  ESP8266SAM *sam = new ESP8266SAM;
-  String text20 = "Connected to your wifi. The i p to config the drum parameters is  " + (String)WiFi.localIP().toString() +".";
-  const char* text = text20.c_str();
-    Serial.println(text);
 
-  sam->Say(out, text);
-  delay(2500);
-  sam->Say(out, text);
-  delay(2500);
-  String text21 = "To use midi, make sure you an r t p midi session that is enabled. Add device named arduino with host. " + (String)WiFi.localIP().toString() + " at port 5004. Then press the Connect button. Then open a MIDI listener (for example MIDI O X) and monitor incoming notes.";
-  const char*  text2 = text21.c_str();
-  sam->Say(out, text2);
-  delay(2500);
+  Beginplay(9, wifi_msg, wifi_msg_len, 1, 0);
+
+
+
 
 
 
@@ -374,7 +384,7 @@ void Beginplay(int Channel, const void *wavfilename, int sizewav, float Volume, 
     t0 = start[Channel];
 
 
-    if (wifiEnabled)
+    if (wifiEnabled && note > 0)
     {
       byte velocity = Volume * 127;
       byte channel = 1;
@@ -531,11 +541,11 @@ void EnableWifi()
   WiFiManager wifiManager;
   if (!wifiManager.autoConnect("bateria"))
   {
-    ESP8266SAM *sam = new ESP8266SAM;
-    sam->Say(out, "No wifi found. An access point has been createad to config your wifi parameters. The ip off the captive portal is 192 168 4 1. ");
-    delay(2000);
-    sam->Say(out, "No wifi found. An access point has been createad to config your wifi parameters. The ip off the captive portal is 192 168 4 1. ");
-    delay(2000);
+    Beginplay(8, no_wifi, no_wifi_len, 1, 0);
+
+
+    // sam->Say(out, "No wifi found. An access point has been createad to config your wifi parameters. The ip off the captive portal is 192 168 4 1. ");
+
   }
 
   initWifi();
