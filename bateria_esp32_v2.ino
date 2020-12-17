@@ -21,7 +21,7 @@ uint64_t reg_b; // Used to store ADC2 control register
 #include "pie_izq_cer.h"
 
 unsigned long t0 = millis();
-long freqTamborMillis = 200.0; //600bpm
+long freqTamborMillis = 50.0; //600bpm
 int j = 0;
 
 
@@ -38,6 +38,7 @@ AsyncWebServer server(80);
 
 APPLEMIDI_CREATE_INSTANCE(WiFiUDP, MIDI, "ESP32", DEFAULT_CONTROL_PORT);
 
+boolean wifiEnabled = false;
 
 
 AudioOutputI2S *out; //internal DAC channel 1 (pin25) on ESP32
@@ -47,7 +48,7 @@ AudioGeneratorWAV *wav[8];
 AudioFileSourcePROGMEM *file[8];
 boolean Running[8];
 long start[8];
-int adc_gpios[8]={36,39,34,35,32,33,27,14};
+int adc_gpios[8] = {36,  34, 35, 32, 33, 27, 14, 12};
 
 int valoresMaximos[8];
 
@@ -65,16 +66,18 @@ int eepromInicializada = 0; //eeprom pos 1. Está a 1 si la placa está iniciali
 
 void setup()
 {
-   reg_b = READ_PERI_REG(SENS_SAR_READ_CTRL2_REG);
+  reg_b = READ_PERI_REG(SENS_SAR_READ_CTRL2_REG);
 
   Serial.begin(115200);
   EEPROM.begin(512);
   delay(1000);
   leerEeprom(); //Lee las variables configurables de la Eeprom y si tienen valores inválidos, las inicializa
 
+if(wifiEnabled)
+{
   WiFiManager wifiManager;
   wifiManager.autoConnect("bateria");
-
+}
   audioLogger = &Serial;
 
   out = new AudioOutputI2S();
@@ -84,7 +87,7 @@ void setup()
   {
     stub[i] = mixer->NewInput();
     start[i] = 0;
-      pinMode(adc_gpios[i], INPUT);
+    pinMode(adc_gpios[i], INPUT);
 
   }
   delay(100);
@@ -92,7 +95,7 @@ void setup()
 
 
 
-
+if(wifiEnabled)
   initWifi();
   resetValoresMax();
 }
@@ -100,8 +103,8 @@ void setup()
 void loop()
 {
 
-
-  MIDI.read();
+  if (wifiEnabled)
+    MIDI.read();
   //Serial.println("a:)");
 
   leerPiezos();
@@ -124,8 +127,8 @@ void loop()
 
       stub[i]->stop();
       //Serial.println("f:)");
-     // delete wav[i];
-   //   delete file[i];
+      // delete wav[i];
+      //   delete file[i];
       Running[i] = false; Serial.printf("stopping %d \n", i);
 
 
@@ -140,8 +143,8 @@ void loop()
         //  Serial.println("i:)");
         stub[i]->SetGain(0.0);
         stub[i]->stop();
-     //        delete wav[i];
-    //    delete file[i];
+        //        delete wav[i];
+        //    delete file[i];
         Running[i] = false; Serial.printf("stopping %d \n", i);
 
       }
@@ -200,7 +203,8 @@ void initWifi()
     if (request->hasParam("accion") && request->getParam("accion")->value() == "ResetMax")
       resetValoresMax();
 
-
+    if (request->hasParam("accion") && request->getParam("accion")->value() == "DisableWifi")
+      DisableWifi();
 
     String strRoot = "<!DOCTYPE HTML><html>\
     <body>\
@@ -218,6 +222,7 @@ void initWifi()
 
     strRoot = strRoot + "<form>\
     <button name=\"accion\" type=\"submit\" value=\"ResetMax\">Resetea máximos</button><br>\
+    <button name=\"accion\" type=\"submit\" value=\"DisableWifi\">Desactiva wifi y midi</button><br>\
     </form> \
     </body>\
     </html>";
@@ -326,15 +331,15 @@ void leerEeprom()
 void Beginplay(int Channel, const void *wavfilename, int sizewav, float Volume, byte note) {
   if (millis() - start[Channel] > freqTamborMillis)
   {
-     //  Volume=1.0;
+    //  Volume=1.0;
 
     Serial.printf("CH:");
     Serial.print(Channel);
     stub[Channel]->SetGain(Volume);
-//    delete wav[Channel];
+    //    delete wav[Channel];
     wav[Channel] = new AudioGeneratorWAV();
 
-  //  delete file[Channel]; // housekeeping ?
+    //  delete file[Channel]; // housekeeping ?
 
     file[Channel] = new AudioFileSourcePROGMEM( wavfilename, sizewav );
 
@@ -346,12 +351,15 @@ void Beginplay(int Channel, const void *wavfilename, int sizewav, float Volume, 
     start[Channel] = millis();
     t0 = start[Channel];
 
-    byte velocity = Volume * 127;
-    byte channel = 1;
 
-    MIDI.sendNoteOn(note, velocity, channel);
-    MIDI.sendNoteOff(note, velocity, channel);
+    if (wifiEnabled)
+    {
+      byte velocity = Volume * 127;
+      byte channel = 1;
 
+      MIDI.sendNoteOn(note, velocity, channel);
+      MIDI.sendNoteOff(note, velocity, channel);
+    }
   }
 }
 
@@ -385,35 +393,37 @@ void leerPiezos() {
     /**
        4051
     */
-    if(i>5)
+    if (i > 4 && wifiEnabled)
     {
       WRITE_PERI_REG(SENS_SAR_READ_CTRL2_REG, reg_b);
       //VERY IMPORTANT: DO THIS TO NOT HAVE INVERTED VALUES!
       SET_PERI_REG_MASK(SENS_SAR_READ_CTRL2_REG, SENS_SAR2_DATA_INV);
-       
+
     }
-   
+
     int val = analogRead(adc_gpios[i]);
-/* vamos a probar a quitar esto
-    if(i>5 && val==4095)
-      val=0; */
-     
-     
-  if (i == 0 && pedalHit && configMin[i] >= val)
-  {
-     
-    pedalHit = false;
+    if (i > 4 && val == 4095 && wifiEnabled)
+      val = 0;
 
 
-    Beginplay(0, pie_izq_cer, pie_izq_cer_len, configVol[valorMax], 70);
-    pararSplash = true;
+    if (i == 0 && pedalHit && configMin[i] >= val)
+    {
 
-  }
-     if(i==0 && configMin[i] < val)
-     {
-        pedalHit = true;
-     }
-    if (val > max && i>0)
+      pedalHit = false;
+
+
+      Beginplay(0, pie_izq_cer, pie_izq_cer_len, 0.2, 70);
+      pararSplash = true;
+
+    }
+    //   Serial.printf("valorrrrr %d : %d \n", i, val);
+
+    if (i == 0 && configMin[i] < val)
+    {
+      pedalHit = true;
+
+    }
+    if (val > max && i > 0)
     {
       max = val;
       valorMax = i;
@@ -423,16 +433,17 @@ void leerPiezos() {
        Single
     */
     //int val=analogRead(A0);
-      // Serial.printf("valorrrrr %d : %d \n", i, val);
+    // if(i==7)
+    // Serial.printf("valorrrrr %d : %d \n", i, val);
 
     if (valoresMaximos[i] < val)
       valoresMaximos[i] = val;
   }
 
-/*if(configMin[valorMax] < max && valorMax >-1)
-{
-  Serial.printf("valorrrrr %d : %d \n", valorMax, max);
-}*/
+  /*if(configMin[valorMax] < max && valorMax >-1)
+    {
+    Serial.printf("valorrrrr %d : %d \n", valorMax, max);
+    }*/
 
   if (configMin[valorMax] < max)
   {
@@ -443,17 +454,17 @@ void leerPiezos() {
 
     else if (valorMax == 2)
     {
-     /* float volu=((float)max / (float)configMax[valorMax])*configVol[valorMax];
-        Serial.printf("antes del BEGIN. valorMax: ");
-        Serial.print(valorMax);
-        Serial.print(" . Max: ");
-        Serial.print(max);
-        Serial.print(".  ConfigMax: ");
-        Serial.print(configMax[valorMax]);
-        Serial.print(". configVol: ");
-        Serial.print(configVol[valorMax]);
-        Serial.print(" . Volu: ");
-         Serial.print(volu);*/
+      /* float volu=((float)max / (float)configMax[valorMax])*configVol[valorMax];
+         Serial.printf("antes del BEGIN. valorMax: ");
+         Serial.print(valorMax);
+         Serial.print(" . Max: ");
+         Serial.print(max);
+         Serial.print(".  ConfigMax: ");
+         Serial.print(configMax[valorMax]);
+         Serial.print(". configVol: ");
+         Serial.print(configVol[valorMax]);
+         Serial.print(" . Volu: ");
+          Serial.print(volu);*/
 
       Beginplay(2, der2, der2_len, ((float)max / (float)configMax[valorMax])*configVol[valorMax], 20);
     }
@@ -489,4 +500,16 @@ void resetValoresMax() {
 
 
   }
+}
+
+void DisableWifi()
+{
+  wifiEnabled = false;
+ WiFi.disconnect(true);
+ WiFi.mode(WIFI_OFF);
+  esp_wifi_deinit();
+  //esp_bt_controller_deinit();
+    esp_wifi_disconnect();            // break connection to AP
+    esp_wifi_stop();                 // shut down the wifi radio
+    esp_wifi_deinit();              // release wifi resources
 }
