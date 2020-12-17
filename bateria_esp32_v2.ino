@@ -8,7 +8,7 @@
 #include "soc/sens_reg.h" // needed for adc pin reset
 uint64_t reg_b; // Used to store ADC2 control register
 #include <driver/adc.h>
-
+#include <ESP8266SAM.h>
 
 #include "der1cl.h"
 #include "der1op.h"
@@ -73,11 +73,11 @@ void setup()
   delay(1000);
   leerEeprom(); //Lee las variables configurables de la Eeprom y si tienen valores inválidos, las inicializa
 
-if(wifiEnabled)
-{
-  WiFiManager wifiManager;
-  wifiManager.autoConnect("bateria");
-}
+  if (wifiEnabled)
+  {
+    WiFiManager wifiManager;
+    wifiManager.autoConnect("bateria");
+  }
   audioLogger = &Serial;
 
   out = new AudioOutputI2S();
@@ -90,13 +90,14 @@ if(wifiEnabled)
     pinMode(adc_gpios[i], INPUT);
 
   }
+  pinMode(15, INPUT); //boton para activar wifi
   delay(100);
 
 
 
 
-if(wifiEnabled)
-  initWifi();
+  if (wifiEnabled)
+    initWifi();
   resetValoresMax();
 }
 
@@ -107,6 +108,13 @@ void loop()
     MIDI.read();
   //Serial.println("a:)");
 
+
+  // if condition checks if push button is pressed
+  if ( digitalRead(15) == HIGH )
+  {
+    Serial.println("c:)");
+    EnableWifi();
+  }
   leerPiezos();
   //Serial.println("b:)");
 
@@ -203,8 +211,7 @@ void initWifi()
     if (request->hasParam("accion") && request->getParam("accion")->value() == "ResetMax")
       resetValoresMax();
 
-    if (request->hasParam("accion") && request->getParam("accion")->value() == "DisableWifi")
-      DisableWifi();
+
 
     String strRoot = "<!DOCTYPE HTML><html>\
     <body>\
@@ -222,7 +229,6 @@ void initWifi()
 
     strRoot = strRoot + "<form>\
     <button name=\"accion\" type=\"submit\" value=\"ResetMax\">Resetea máximos</button><br>\
-    <button name=\"accion\" type=\"submit\" value=\"DisableWifi\">Desactiva wifi y midi</button><br>\
     </form> \
     </body>\
     </html>";
@@ -247,6 +253,22 @@ void initWifi()
   Serial.println(F(":5004"));
   Serial.println(F("Then press the Connect button"));
   Serial.println(F("Then open a MIDI listener (eg MIDI-OX) and monitor incoming notes"));
+
+  ESP8266SAM *sam = new ESP8266SAM;
+  String text20 = "Connected to your wifi. The i p to config the drum parameters is  " + (String)WiFi.localIP().toString() +".";
+  const char* text = text20.c_str();
+    Serial.println(text);
+
+  sam->Say(out, text);
+  delay(2500);
+  sam->Say(out, text);
+  delay(2500);
+  String text21 = "To use midi, make sure you an r t p midi session that is enabled. Add device named arduino with host. " + (String)WiFi.localIP().toString() + " at port 5004. Then press the Connect button. Then open a MIDI listener (for example MIDI O X) and monitor incoming notes.";
+  const char*  text2 = text21.c_str();
+  sam->Say(out, text2);
+  delay(2500);
+
+
 
   MIDI.begin(1);
 
@@ -502,14 +524,19 @@ void resetValoresMax() {
   }
 }
 
-void DisableWifi()
+void EnableWifi()
 {
-  wifiEnabled = false;
- WiFi.disconnect(true);
- WiFi.mode(WIFI_OFF);
-  esp_wifi_deinit();
-  //esp_bt_controller_deinit();
-    esp_wifi_disconnect();            // break connection to AP
-    esp_wifi_stop();                 // shut down the wifi radio
-    esp_wifi_deinit();              // release wifi resources
+  wifiEnabled = true;
+
+  WiFiManager wifiManager;
+  if (!wifiManager.autoConnect("bateria"))
+  {
+    ESP8266SAM *sam = new ESP8266SAM;
+    sam->Say(out, "No wifi found. An access point has been createad to config your wifi parameters. The ip off the captive portal is 192 168 4 1. ");
+    delay(2000);
+    sam->Say(out, "No wifi found. An access point has been createad to config your wifi parameters. The ip off the captive portal is 192 168 4 1. ");
+    delay(2000);
+  }
+
+  initWifi();
 }
