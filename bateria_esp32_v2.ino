@@ -8,6 +8,19 @@
 #include "soc/sens_reg.h" // needed for adc pin reset
 uint64_t reg_b; // Used to store ADC2 control register
 #include <driver/adc.h>
+#include <AudioFileSourcePROGMEM.h>
+
+
+#include "1mgm_h.h"
+#include "furelise_h.h"
+#define LED_BUILTIN 2
+
+
+#include <AudioGeneratorMIDI.h>
+
+AudioFileSourcePROGMEM *sf2;
+AudioFileSourcePROGMEM *mid;
+AudioGeneratorMIDI *midii;
 
 #include "der1cl.h"
 #include "der1op.h"
@@ -61,7 +74,6 @@ int j = 0;
 #include "AppleMIDI.h"
 USING_NAMESPACE_APPLEMIDI
 
-#include <AudioFileSourcePROGMEM.h>
 #include "AudioGeneratorWAV.h"
 #include "AudioOutputI2S.h"
 #include "AudioOutputMixer.h"
@@ -101,6 +113,8 @@ void setup()
   //TODO: Bajarlo antes de activar el wifi
   reg_b = READ_PERI_REG(SENS_SAR_READ_CTRL2_REG);
 
+  pinMode(LED_BUILTIN, OUTPUT);
+
   Serial.begin(115200);
   EEPROM.begin(512);
   delay(1000);
@@ -135,6 +149,15 @@ void setup()
   if (wifiEnabled)
     initWifi();
   resetValoresMax();
+
+  sf2 = new AudioFileSourcePROGMEM(mgm_h, __1mgm_sf2_len);
+  mid = new AudioFileSourcePROGMEM(furelise_h, furelise_mid_len);
+
+  midii = new AudioGeneratorMIDI();
+  midii->SetSoundfont(sf2);
+  midii->SetSampleRate(22050);
+  Serial.printf("BEGIN...\n");
+  midii->begin(mid, out);
 }
 
 void loop()
@@ -143,7 +166,15 @@ void loop()
   if (wifiEnabled)
     MIDI.read();
   //Serial.println("a:)");
-
+  if (midii->isRunning()) {
+    if (!midii->loop()) {
+      uint32_t e = millis();
+      midii->stop();
+    }
+  } else {
+    Serial.printf("MIDI done\n");
+    delay(1000);
+  }
 
   // if condition checks if push button is pressed
   if ( digitalRead(15) == HIGH )
