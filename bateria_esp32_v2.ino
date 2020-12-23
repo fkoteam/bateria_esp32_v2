@@ -2,6 +2,7 @@
 #include <WiFiManager.h>
 #include <EEPROM.h>
 #include <WiFiUdp.h>
+#include <SPIFFS.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include "esp32-hal-adc.h" // needed for adc pin reset
@@ -11,8 +12,8 @@ uint64_t reg_b; // Used to store ADC2 control register
 #include <AudioFileSourcePROGMEM.h>
 
 
-#include "1mgm_h.h"
-#include "furelise_h.h"
+#include "Standard.h"
+#include "pop1.h"
 #define LED_BUILTIN 2
 
 
@@ -103,6 +104,8 @@ double configVol[8];
 boolean pedalHit = false;
 boolean pararSplash = false;
 
+boolean playMidi = false;
+
 
 int eepromInicializada = 0; //eeprom pos 1. Está a 1 si la placa está inicializada
 
@@ -116,6 +119,9 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
 
   Serial.begin(115200);
+  if(!SPIFFS.begin()){ 
+    Serial.println("An Error has occurred while mounting SPIFFS");  
+  }
   EEPROM.begin(512);
   delay(1000);
   leerEeprom(); //Lee las variables configurables de la Eeprom y si tienen valores inválidos, las inicializa
@@ -150,30 +156,32 @@ void setup()
     initWifi();
   resetValoresMax();
 
-  sf2 = new AudioFileSourcePROGMEM(mgm_h, __1mgm_sf2_len);
-  mid = new AudioFileSourcePROGMEM(furelise_h, furelise_mid_len);
+  sf2 = new AudioFileSourcePROGMEM(Standard_sf2, Standard_sf2_len);
 
-  midii = new AudioGeneratorMIDI();
-  midii->SetSoundfont(sf2);
-  midii->SetSampleRate(22050);
-  Serial.printf("BEGIN...\n");
-  midii->begin(mid, out);
+
 }
 
 void loop()
 {
 
-  if (wifiEnabled)
+  if (wifiEnabled && !midii->isRunning())
     MIDI.read();
   //Serial.println("a:)");
   if (midii->isRunning()) {
     if (!midii->loop()) {
-      uint32_t e = millis();
       midii->stop();
+      if (playMidi)
+      {
+        delete mid; delete midii;
+        mid = new AudioFileSourcePROGMEM(pop1_mid, pop1_mid_len);
+
+        midii = new AudioGeneratorMIDI();
+        midii->SetSoundfont(sf2);
+        midii->SetSampleRate(22050);
+        midii->begin(mid, out);
+
+      }
     }
-  } else {
-    Serial.printf("MIDI done\n");
-    delay(1000);
   }
 
   // if condition checks if push button is pressed
@@ -247,6 +255,11 @@ void initWifi()
 
   //server.reset(new ESPAsyncWebServer(WiFi.localIP(), 80));
 
+server.on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
+        request->send(200);
+      }, handleUpload);
+
+      
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
     for (int i = 0; i < 8; i++)
     {
@@ -283,6 +296,26 @@ void initWifi()
     if (request->hasParam("accion") && request->getParam("accion")->value() == "ResetMax")
       resetValoresMax();
 
+    if (request->hasParam("accion") && request->getParam("accion")->value() == "PlayMidi")
+    {
+      mid = new AudioFileSourcePROGMEM(pop1_mid, pop1_mid_len);
+
+      midii = new AudioGeneratorMIDI();
+      midii->SetSoundfont(sf2);
+      midii->SetSampleRate(22050);
+      Serial.printf("BEGIN...\n");
+      midii->begin(mid, out);
+      playMidi = true;
+    }
+
+
+    if (request->hasParam("accion") && request->getParam("accion")->value() == "StopMidi")
+    {
+      midii->stop();
+      delete mid; delete midii;
+
+      playMidi = false;
+    }
 
 
     String strRoot = "<!DOCTYPE HTML><html>\
@@ -301,7 +334,14 @@ void initWifi()
 
     strRoot = strRoot + "<form>\
     <button name=\"accion\" type=\"submit\" value=\"ResetMax\">Resetea máximos</button><br>\
-    </form> \
+    </form>\
+    <form>\
+    <button name=\"accion\" type=\"submit\" value=\"PlayMidi\">Play Midi</button><br>\
+    </form>\
+    <form>\
+    <button name=\"accion\" type=\"submit\" value=\"StopMidi\">Stop Midi</button><br>\
+    </form>\
+    <form action=\"upload\" method=\"post\" enctype=\"multipart/form-data\" name=\"data\"><input type=\"file\"><button type=\"submit\">Upload midi</button></form>\
     </body>\
     </html>";
 
@@ -453,32 +493,39 @@ void leerEeprom()
 void Beginplay(int Channel, const void *wavfilename, int sizewav, float Volume, byte note) {
   if (millis() - start[Channel] > freqTamborMillis)
   {
-    //  Volume=1.0;
+    if (midii->isRunning())
+    {
+      midii->playSingleNote(note, Volume);
+    }
+    else
+    {
+      //  Volume=1.0;
 
-    Serial.printf("CH:");
-    Serial.print(Channel);
+      Serial.printf("CH:");
+      Serial.print(Channel);
 
-    stub[Channel]->SetGain(Volume);
+      stub[Channel]->SetGain(Volume);
 
-    //    delete wav[Channel];
-
-
-    wav[Channel] = new AudioGeneratorWAV();
-
-    //  delete file[Channel]; // housekeeping ?
-    file[Channel] = new AudioFileSourcePROGMEM( wavfilename, sizewav );
+      //    delete wav[Channel];
 
 
-    wav[Channel]->begin(file[Channel], stub[Channel]);
+      wav[Channel] = new AudioGeneratorWAV();
 
-    Running[Channel] = true;
-    Serial.printf("> at volume :");
-    Serial.println(Volume);
+      //  delete file[Channel]; // housekeeping ?
+      file[Channel] = new AudioFileSourcePROGMEM( wavfilename, sizewav );
+
+
+      wav[Channel]->begin(file[Channel], stub[Channel]);
+
+      Running[Channel] = true;
+      Serial.printf("> at volume :");
+      Serial.println(Volume);
+    }
     start[Channel] = millis();
     t0 = start[Channel];
 
 
-    if (wifiEnabled )
+    if (wifiEnabled && !midii->isRunning() )
     {
       byte velocity = Volume * 127;
       byte channel = 1;
@@ -491,34 +538,13 @@ void Beginplay(int Channel, const void *wavfilename, int sizewav, float Volume, 
 
 void leerPiezos() {
 
-
-  /* if (millis() - t0 > freqTamborMillis)
+  /* if (!midii->isRunning())
     {*/
   int max = 0;
   int valorMax = -1;
   for (int i = 0; i < 8  ; i++)
   {
-    /* random */
-    /*   int val=0;
-      if (millis() - t0 > 1000)
-      {
-      t0 = millis();
-      if (j == i)
-      {
-          Serial.printf("asignando valor 1000");
 
-        val = 200;
-
-      }
-      j++;
-      if (j > 7)
-        j = 0;
-      }*/
-
-
-    /**
-       4051
-    */
     if (i > 4 && wifiEnabled)
     {
       WRITE_PERI_REG(SENS_SAR_READ_CTRL2_REG, reg_b);
@@ -573,6 +599,7 @@ void leerPiezos() {
 
   if (configMin[valorMax] < max)
   {
+
     if (valorMax == 1 && pedalHit)
       Beginplay(1, der1op, der1op_len, ((float)max / (float)configMax[valorMax])*configVol[valorMax], 46);
     else if (valorMax == 1 && !pedalHit)
@@ -612,7 +639,7 @@ void leerPiezos() {
 
 
 
-    // }
+    //  }
 
 
 
@@ -644,4 +671,24 @@ void EnableWifi()
 
   */
   initWifi();
+}
+
+
+
+void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+  if(!index){
+     Serial.println((String)"UploadStart: " + filename);
+    // open the file on first call and store the file handle in the request object
+    request->_tempFile = SPIFFS.open("/"+filename, "w");
+  }
+  if(len) {
+    // stream the incoming chunk to the opened file
+    request->_tempFile.write(data,len);
+  }
+  if(final){
+    Serial.println((String)"UploadEnd: " + filename + ",size: " + index+len);
+    // close the file handle as the upload is now done
+    request->_tempFile.close();
+    request->redirect("/");
+  }
 }
